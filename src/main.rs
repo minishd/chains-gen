@@ -2,20 +2,21 @@ use std::time::Instant;
 
 use markov::{MarkovAllNodes, MarkovNode, MarkovToken};
 
+use rayon::{iter::ParallelIterator, str::ParallelString};
+
 mod markov;
 
 fn main() {
     // chain creation
 
     let content = std::fs::read_to_string("./data.txt").unwrap();
-    let lines = content.lines();
 
-    let mut all_nodes = MarkovAllNodes::new();
+    let all_nodes = MarkovAllNodes::new();
     let root_node = MarkovNode::new(MarkovToken::Root);
     let end_node = MarkovNode::new(MarkovToken::End);
 
     let start = Instant::now();
-    for line in lines {
+    content.par_lines().for_each(|line| {
         let mut nodes = line
             .split_whitespace()
             .filter(|s| s.chars().all(|c| c.is_ascii_alphanumeric()))
@@ -30,12 +31,19 @@ fn main() {
                 break;
             }
 
-            node.conns.borrow_mut().connect(next_node.clone());
+            node.conns.connect(next_node.clone());
 
             node = next_node;
         }
-    }
+    });
     println!("took {:?} to create chain", start.elapsed());
+
+    // cache index maps
+
+    let start = Instant::now();
+    root_node.conns.index_map();
+    all_nodes.cache_index_maps();
+    println!("took {:?} to cache index maps", start.elapsed());
 
     // generation
 
@@ -52,7 +60,7 @@ fn main() {
             .unwrap_or_else(|| root_node.clone());
 
         loop {
-            let next_node = node.conns.borrow().random_weighted(&mut rng);
+            let next_node = node.conns.random_weighted(&mut rng);
 
             if let MarkovToken::Value(value) = &node.value {
                 result += value;
